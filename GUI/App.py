@@ -9,34 +9,49 @@ from PyQt5.QtGui import QImage, QPixmap, QFont, QMovie, QIcon
 from PyQt5.QtWidgets import *
 from enum import Enum
 
+from GUI.DefineErrors import DefineErrors
+from GUI.EnumFiles import ExcersiceState, SqutsState, ExcersiceType
+from GUI.ExcersicePrc import ExrProcessing
+from GUI.TrainerWait import TrainerWait
+from GUI.TrainerWaitWindow import TimeWindow
 from GUI.VideoWorker import VideoThreadWork
 from Bot.TeleBotError import Mail
+from GUI.WaitFunc import TrainerWaitThreadWork
 
-
-class SqutsState(Enum):
-    Sitting = 1
-    Standing = 2
-
-class ExcersiceState(Enum):
-    Waiting = 0
-    Preparing = 1
-    Working = 2
 
 class App(QWidget):
-    def __init__(self, cam_list):
+    def __init__(self, cam_list, ex_type=ExcersiceType.Squats):
+
         super().__init__()
-        self.messageBot = Mail()
         self.listCam = cam_list
+        self.messageBot = Mail()
         self.landmarks = None
+        self.val = 0
+        if ex_type == ExcersiceType.Squats:
+            self.exercise = ExrProcessing(req_ang_start={'left_knee': [170, 180]}, req_ang_proc={'left_knee': [70, 100]}, req_ang_end={'left_knee': [170, 180]}, req_dist=[[12, 24],[11, 23]], req_coord=[29], key_angle_name=['left_knee', -1], name='SQUATS')
+        elif ex_type == ExcersiceType.Hand:
+            self.exercise = ExrProcessing(req_ang_start={'right_elbow': [80, 100]},
+                                         req_ang_proc={'right_elbow': [10, 50]},
+                                         req_ang_end={'right_elbow': [80, 180]},
+                                         req_dist=[],
+                                         req_coord=[],
+                                         key_angle_name=['right_elbow', -1],
+                                         name='SQUATS')
+
         self.excCurrentState = ExcersiceState.Waiting
         self.camFirst = False
         self.camSec = False
+        self.errors_manager = DefineErrors()
         self.state = SqutsState.Sitting
         self.legsPos = list()
         self.sharedMem = list()
+        self.errorTimer = QTimer()
+        self.allowChangeVideo = True
         self.amount = 0
         self.sqatsMem = list()
         self.initUI()
+
+
 
     @pyqtSlot(QImage, int)
     def setImage(self, image, num):
@@ -77,7 +92,7 @@ class App(QWidget):
                 dataSolo.append(elem[0])
             self.setText(dataSolo)
 
-    @pyqtSlot(tuple, int, name='squats')
+    @pyqtSlot(dict, int, name='squats')
     def setTextSquats(self, data, num):
         if len(self.listCam) == 2:
             if num == 0 and not self.camFirst:
@@ -91,36 +106,66 @@ class App(QWidget):
             if not self.sqatsMem or self.sqatsMem[0][1] == num:
                 self.sqatsMem.append((data, num))
             else:
-                dataSaved, camSaved = self.sqatsMem.pop()
-                dataRecv, camRecv = data, num
-                if self.excCurrentState == ExcersiceState.Preparing:
-                    self.legsPos.clear()
-                    for el, _ in data[1]:
-                        self.legsPos.append(el)
-                    if self.legsPos:
-                        self.excCurrentState = ExcersiceState.Working
-                elif self.excCurrentState == ExcersiceState.Working:
-                    state = self.checkSquatMultCam(dataSaved, dataRecv)
-                    if state:
-                        self.amount += 1
-                        print('Current - ', self.amount)
-                        self.completeNum.setText(f'{self.amount}')
-                        # self.isExcCorrect.setText('KRUTO!!!!')
+                saved, numb = self.sqatsMem.pop()
+                if self.allowChangeVideo:
+                    self.errors_manager.reset_mistake()
 
+                if self.val == 0:
+                    print('start')
+                    self.exercise.startAnalyze(data, data)
+                    self.val = 1
+                else:
+                    self.exercise.continueAnalyze(data, data)
+                    state = self.exercise.currentExcState
+                    self.amount = self.exercise.done_exercises
+
+
+                    for key, value in self.exercise.mistakes.items():
+
+                        if key == 'ANGLE':
+                            self.errors_manager.define_angle_mistake(self.exercise.name,
+                                                                     self.exercise.mistakes[key], state)
+                        if key == 'COORDINATE':
+                            self.errors_manager.define_coordinate_mistake(self.exercise.name,
+                                                                          self.exercise.mistakes[key])
+                        # if key == 'DISTANCE':
+                        #    errors_manager.define_distance_mistake(self.exercise.name, self.exercise.mistakes[key])
+                        if key == 'START':
+                            self.errors_manager.define_other_mistake(self.exercise.name, self.exercise.mistakes[key])
+
+                    mistake, videoError = self.errors_manager.get_error(self.exercise.name)
+                    self.exercise.mistakes = {'ANGLE': {},
+                                              'DISTANCE': [],
+                                              'COORDINATE': [],
+                                              'START': []
+                                              }
+                    # self.completeNum.setText(str(self.amount))
+                    self.NumberAmount.setText(f'<font color=\"red\">{str(self.amount)}</font>')
+
+
+                    if videoError and self.allowChangeVideo:
+                        pict = QPixmap('pictures/status/fail.jpg')
+                        self.PictureStatus.setPixmap(pict.scaledToHeight(100))
+
+                        self.allowChangeVideo = False
+                        self.errorTimer.timeout.connect(self.changeError)
+                        self.errorTimer.start(2500)
+
+                        self.video.setMovie(videoError)
+                        videoError.start()
+
+                        self.ErrorMess.setText(mistake)
+                    elif not videoError:
+                        self.ErrorMess.setText('everything in ok')
+                        pict = QPixmap('pictures/status/suc.jpg')
+                        self.video.setMovie(QMovie())
+                        # videoError.start()
+                        self.PictureStatus.setPixmap(pict.scaledToHeight(100))
+
+
+
+                    # Reaction for 1 camera data (see setModernText)
                 return None
-        else:
-            if self.excCurrentState == ExcersiceState.Preparing:
-                self.legsPos.clear()
-                for el, _ in data[1]:
-                    self.legsPos.append(el)
-                if self.legsPos:
-                    self.excCurrentState = ExcersiceState.Working
-            elif self.excCurrentState == ExcersiceState.Working:
-                state = self.checkSquatSoloCam(data)
-                if state:
-                    self.amount += 1
-                    print('Current - ', self.amount)
-                    self.completeNum.setText(f'{self.amount}')
                     # self.isExcCorrect.setText('KRUTO!!!!')
 
             # Reaction for 1 camera data (see setModernText)
@@ -221,84 +266,6 @@ class App(QWidget):
             #     print(len, ' - LENG')
         return succ
 
-    def checkSquatMultCam(self, saved, resv):
-        error_list = ('Right elbow', 'Right shoulder', 'Right hip', 'Right knee',
-                      'Left elbow', 'Left shoulder', 'Left hip', 'Left knee')
-        delta = 0.1  ###how to get it?
-        angleFinishBorders = (40, 70)
-        # angleErrorBorders = [(10, 70), (50, 70), (1, 100), (35, 100),
-        #                      (10, 70), (50, 70), (1, 100), (35, 100)]
-        angleErrorBorders = [(0, 180), (0, 180), (0, 180), (0, 180),
-                             (0, 180), (0, 180), (0, 180), (0, 180)]
-        lenErrorBorders = (0.2, 0.46)
-        anglesSaved, legsSaved, backSaved = saved[0], saved[1], saved[2]
-        anglesResv, legsResv, backResv = resv[0], resv[1], resv[2]
-        stateVariable = False
-        error_occured = False
-
-        succ = False
-
-        for pos, (el1, el2) in enumerate(zip(anglesSaved, anglesResv)):
-            angle1, vis1 = el1
-            angle2, vis2 = el2
-            angle = angle1 if vis1 > vis2 else angle2
-            # cam = camSaved if angle == angle1 else camResv
-
-            if max(vis1, vis2) < 0.5:
-                print(f'{error_list[pos]} in dead zone')
-                error_occured = True
-                # excFinished = False
-
-            if self.state == SqutsState.Sitting:
-                if angle < angleErrorBorders[pos][0] or angle > angleErrorBorders[pos][1]:
-                    print(f'Error in {error_list[pos]}. Current - {angle} Waiting angle was in {angleErrorBorders[pos][0]} - {angleErrorBorders[pos][1]}')
-                    error_occured = True
-                if pos == 3:  ##HardCode ebaniu
-                    if angle < angleFinishBorders[0]:
-                        stateVariable = True
-                elif pos == 7:
-                    if stateVariable and angle < angleFinishBorders[0] and not error_occured:
-                        self.state = SqutsState.Standing
-
-            elif self.state == SqutsState.Standing:
-                if angle < angleErrorBorders[pos][0] or angle > angleErrorBorders[pos][1]:
-                    print(f'Error in {error_list[pos]}. Waiting angle was in {angleErrorBorders[pos][0]} - {angleErrorBorders[pos][1]}')
-                    error_occured = True
-                    self.state = SqutsState.Sitting
-                if pos == 3:  ##HardCode ebaniu
-                    if angle < angleFinishBorders[1]:
-                        stateVariable = True
-                elif pos == 7:
-                    if stateVariable and angle > angleFinishBorders[1]:
-                        self.state = SqutsState.Sitting
-                        print('ang - ', angle, 'border - ', angleFinishBorders[0])
-                        succ = True
-
-        # for pos, (el1, el2) in enumerate(zip(legsSaved, legsResv)):
-        #     point1, vis1 = el1
-        #     point2, vis2 = el2
-        #
-        #     point = point1 if vis1 > vis2 else point2
-        #     x, y = point
-        #     xTar, yTar = self.legsPos[pos]
-        #     if np.sqrt((x - xTar) ** 2 + (y - yTar) ** 2) > 0.1:
-        #         print('Pyatki')
-        #         succ = False
-        #
-        #     xNew = xTar + delta * (x - xTar)
-        #     yNew = yTar + delta * (y - yTar)
-        #     self.legsPos[pos] = [xNew, yNew]
-
-        # for el1, el2 in zip(backSaved, backResv):
-        #     len1, vis1 = el1
-        #     len2, vis2 = el2
-        #     leng = len1 if vis1 > vis2 else len2
-        #
-        #     if leng < lenErrorBorders[0] or leng > lenErrorBorders[1]:
-        #         print('Spina v govne')
-
-        return succ
-
     def create_text_instance(self, labelName: QLabel, labelComment: str):
         frame = QFrame(self)
         hbox = QHBoxLayout()
@@ -311,6 +278,10 @@ class App(QWidget):
 
         frame.setLayout(hbox)
         return frame
+
+    def changeError(self):
+        self.allowChangeVideo = True
+        self.errorTimer.disconnect()
 
     def startEx(self):
         self.buttonSt.setEnabled(False)
@@ -363,6 +334,13 @@ class App(QWidget):
 
         return but
 
+    def trainer_button(self):
+            TrainerWait().send_message_to_trainer('0')
+            th = TrainerWaitThreadWork()
+            th.getAnswer.connect(self.TrainerWait)
+            th.start()
+            self.className = TimeWindow()
+
     def initUI(self):
 
         hbox = QHBoxLayout()
@@ -393,6 +371,7 @@ class App(QWidget):
         hboxButtons.addWidget(self.pause)
 
         self.call = self.create_button('Call trainer', self.react)
+        self.call.clicked.connect(self.trainer_button)
         hboxButtons.addWidget(self.call)
 
         self.finish = self.create_button('Finish', self.react)
@@ -435,11 +414,15 @@ class App(QWidget):
         CompText = QLabel("<font color=\"blue\">Completed: </font>")
         CompText.setFont(QFont("Arial", 26, QFont.Bold))
         vboxComplete.addWidget(CompText)
+        vboxComplete.addStretch(1)
+
 
         self.NumberAmount = QLabel("<font color=\"red\">0</font>")
         self.NumberAmount.setFont(QFont("Arial", 40, QFont.Bold))
         self.NumberAmount.setAlignment(Qt.AlignCenter)
         vboxComplete.addWidget(self.NumberAmount)
+        vboxComplete.addStretch(5)
+
 
         frameComplete.setLayout(vboxComplete)
         hboxText.addWidget(frameComplete)
@@ -451,16 +434,21 @@ class App(QWidget):
 
         StatText = QLabel("<font color=\"blue\">Status: </font>")
         StatText.setFont(QFont("Arial", 26, QFont.Bold))
+        StatText.setAlignment(Qt.AlignCenter)
         vboxStatus.addWidget(StatText)
+        vboxStatus.addStretch(1)
 
         self.PictureStatus = QLabel()
         pict = QPixmap('pictures/status/suc.jpg')
         self.PictureStatus.setPixmap(pict.scaledToHeight(100))
         self.PictureStatus.setAlignment(Qt.AlignCenter)
         vboxStatus.addWidget(self.PictureStatus)
+        vboxStatus.addStretch(5)
+
 
         frameStatus.setLayout(vboxStatus)
         hboxText.addWidget(frameStatus)
+        hboxText.addStretch(1)
 
         frameStatistic.setLayout(hboxText)
         vboxInform.addWidget(frameStatistic)
@@ -469,21 +457,22 @@ class App(QWidget):
         StateMess.setFont(QFont("Arial", 26, QFont.Bold))
         vboxInform.addWidget(StateMess)
 
-        self.ErrorMess = QLabel('Pyatki')
+        self.ErrorMess = QLabel('Preparing')
         self.ErrorMess.setFont(QFont("Arial", 26, QFont.Bold))
         vboxInform.addWidget(self.ErrorMess)
 
-        video = QLabel()
-        video.setGeometry(QRect(25, 25, 200, 200))
-        video.setMinimumSize(QSize(200, 200))
-        video.setMaximumSize(QSize(200, 200))
-        video.setObjectName("label")
+        self.video = QLabel()
+        self.video.setGeometry(QRect(25, 25, 200, 200))
+        self.video.setMinimumSize(QSize(300, 300))
+        self.video.setMaximumSize(QSize(300, 300))
+        self.video.setObjectName("label")
 
-        self.movie = QMovie("pictures/radio.gif")
-        video.setMovie(self.movie)
+        self.movie = QMovie("pictures/ExcersiceGif/wait.gif")
+        # self.movie = QMovie()
+        self.video.setMovie(self.movie)
         self.movie.start()
 
-        vboxInform.addWidget(video, alignment=Qt.AlignCenter)
+        vboxInform.addWidget(self.video, alignment=Qt.AlignCenter)
         frameFullInfrom.setLayout(vboxInform)
 
         hbox.addWidget(frameFullInfrom)
@@ -498,7 +487,7 @@ class App(QWidget):
         # th.changeText.connect(self.setText)
         # th.changeTextModern.connect(self.setTextModern)
         # th.startExcercise.connect(self.handExcersice)
-        # th.startExcerciseSquats.connect(self.setTextSquats)
+        th.startExcerciseSquats.connect(self.setTextSquats)
         # th.exCounter.connect(self.completeChange)
         th.start()
 
@@ -508,10 +497,10 @@ class App(QWidget):
             # th.changeText.connect(self.setText)
             # th.startExcercise.connect(self.handExcersice)
             # th.changeTextModern.connect(self.setTextModern)
-            # th.startExcerciseSquats.connect(self.setTextSquats)
+            th.startExcerciseSquats.connect(self.setTextSquats)
             #
             # th.exCounter.connect(self.completeChange)
             th.start()
-
+        self.setStyleSheet("background-color: white;")
         self.show()
 

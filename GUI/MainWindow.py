@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import *
 from enum import Enum
 
 from GUI.App import App
+from GUI.EnumFiles import ExcersiceType
 from GUI.TrainerWaitWindow import TimeWindow
 from GUI.TrainerWait import TrainerWait
 from GUI.WaitFunc import TrainerWaitThreadWork
@@ -17,14 +18,6 @@ from GUI.WaitFunc import TrainerWaitThreadWork
 class ExcersiceStyle(Enum):
     Trainer = 0
     Myself = 1
-
-class ExcersiceType(Enum):
-    Hand = 0
-    Squats = 1
-    AnotherOne = 2
-    AnotherTwo = 3
-    AnotherThree = 4
-    LastOne = 5
 
 
 StyleSheet = '''
@@ -107,7 +100,8 @@ class MainWindow(QMainWindow):
                 button.setIconSize(QSize(320, 320))
 
                 # button.setStyleSheet(f'background - image: url({name});')
-                button.setFixedSize(QSize(320, 320))
+                button.setFixedSize(QSize(240, 300))
+                # button.setFixedSize(QSize(320, 320))
                 # button.setContentsMargins(0, 0, 0, 0)
             buttons.append(button)
             hbox.addWidget(button)
@@ -149,18 +143,18 @@ class MainWindow(QMainWindow):
         vboxBut = QVBoxLayout()
         self.exButtons = []
 
-        reactions = (partial(self.exc_button, ExcersiceType.Hand), partial(self.exc_button, ExcersiceType.Squats),
-                     partial(self.exc_button, ExcersiceType.AnotherOne))
+        reactions = (partial(self.exc_button, ExcersiceType.Squats), partial(self.exc_button, ExcersiceType.AnotherOne),
+                     partial(self.exc_button, ExcersiceType.AnotherTwo))
 
-        pictures = ('pictures/buttons/squats.png', 'pictures/buttons/time.png', 'pictures/buttons/run.png')
+        pictures = ('pictures/buttons/squats.jpg', 'pictures/buttons/other.jpg', 'pictures/buttons/other.jpg')
         exs, frame = self.create_multi_buttons(reactions, pictures)
         self.exButtons += exs
         vboxBut.addWidget(frame)
 
-        reactions = (partial(self.exc_button, ExcersiceType.AnotherTwo), partial(self.exc_button, ExcersiceType.AnotherThree),
+        reactions = (partial(self.exc_button, ExcersiceType.Hand), partial(self.exc_button, ExcersiceType.AnotherThree),
                      partial(self.exc_button, ExcersiceType.LastOne))
 
-        pictures = ('pictures/buttons/hand.png', 'pictures/buttons/weight.png', 'pictures/buttons/chill.png')
+        pictures = ('pictures/buttons/hand.png', 'pictures/buttons/other.jpg', 'pictures/buttons/other.jpg')
         exs, frame = self.create_multi_buttons(reactions, pictures)
         self.exButtons += exs
         vboxBut.addWidget(frame)
@@ -258,7 +252,6 @@ class MainWindow(QMainWindow):
         WidgUserOpt.setLayout(vboxOpt)
 
 
-
         hboxGlobal.addWidget(WidgUserOpt)
         globWidget.setLayout(hboxGlobal)
         vboxMain.addWidget(globWidget)
@@ -277,11 +270,14 @@ class MainWindow(QMainWindow):
 
         # vboxMain.addWidget(self.create_multi_buttons(messages, reactions)[1])
 
+        self.own_button()
         mainWigh.setLayout(vboxMain)
         # self.trainer_button()
         self.setCentralWidget(mainWigh)
         self.setGeometry(600, 300, 120, 200)
-        self.setWindowTitle('Main Window')
+        self.setStyleSheet("background-color: white;")
+
+        self.setWindowTitle('Digital coach')
         self.show()
 
 
@@ -295,7 +291,11 @@ class MainWindow(QMainWindow):
             self.className = TimeWindow()
 
         elif self.style == ExcersiceStyle.Myself:
-            self.camera_launch()
+            print(self.exType)
+            if self.exType in {ExcersiceType.Hand, ExcersiceType.Squats}:
+                self.camera_launch(self.exType)
+            else:
+                QMessageBox.information(self, 'Notification', 'Work on progress')
 
     def return_camera_indexes(self, start=10):
         # checks the first 10 indexes.
@@ -311,15 +311,16 @@ class MainWindow(QMainWindow):
             i -= 1
         return arr
 
-    def camera_launch(self):
-        cameras = self.return_camera_indexes(40) ### Trying to find cameras port
-        print(cameras)
+    def camera_launch(self, ex_type):
+        # cameras = self.return_camera_indexes(40) ### Trying to find cameras port
+        # print(cameras)
+        # cameras = [2, 0]
         cameras = [0, 2]
         # cameras = [0]
         # self.w = App(cameras)
         ##Add Excercise
-        self.w = App(cameras)
-        self.w.show()
+        self.w = App(cameras, ex_type)
+        # self.w.show()
 
 
 def start():

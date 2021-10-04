@@ -33,7 +33,7 @@ class VideoThreadWork(QThread):
     getDict = pyqtSignal(dict)
     exCounter = pyqtSignal(int)
     startExcercise = pyqtSignal(str, str)
-    startExcerciseSquats = pyqtSignal(tuple, int, name='squats')
+    startExcerciseSquats = pyqtSignal(dict, int, name='squats')
 
 
     def __init__(self, cam_num, *args, **kwargs):
@@ -200,20 +200,17 @@ class VideoThreadWork(QThread):
 
         # return Tuple[Counted values: List[...], self.cam]
 
-
     def run(self):
         right = ([16, 14, 12], [14, 12, 24])
         left = ([15, 13, 11], [13, 11, 23])
-        # cap = cv2.VideoCapture('rtsp://192.168.1.1')
         cap = cv2.VideoCapture(self.cam)
         fps = cap.get(cv2.CAP_PROP_FPS)
-        print (f'Frames per second using video.get(cv2.cv.CV_CAP_PROP_FPS): {fps} in camera {self.cam}')
+        print(f'Frames per second using video.get(cv2.cv.CV_CAP_PROP_FPS): {fps} in camera {self.cam}')
         while True:
             ret, frame = cap.read()
-            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-
             if ret:
                 landmarks = self.get_new_frame_from_neuron(frame)
+                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
                 # markedQtImage = get_new_frame_from_neuron(frame)
 
                 rgbImage = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -236,10 +233,7 @@ class VideoThreadWork(QThread):
 
                     angList = self.get_angle(landmarks, ([16, 14, 12], [14, 12, 24], [15, 13, 11], [13, 11, 23]))
                     activeAngleList = self.get_angle(landmarks, active_points)  ###Fix it
-                    result = self.excersice_squats(landmarks, angList=(right_elbow, right_shoulder, right_hip, right_knee,
-                                           left_elbow, left_shoulder, left_hip, left_knee),
-                                          footPoint=(right_heel + left_heel), backPoint= (right_back, left_back))
-                    self.startExcerciseSquats.emit(result, self.cam)
+                    self.startExcerciseSquats.emit(landmarks, self.cam)
                     self.changeTextModern.emit(tuple(angList), self.cam)
 
                     old = self.res
@@ -248,7 +242,6 @@ class VideoThreadWork(QThread):
                     self.startExcercise.emit(active_hand, self.res)
 
                 self.getDict.emit(landmarks)
-
 
 
 
